@@ -36,12 +36,6 @@ namespace ServerPinger
 
     public class Program : IFailureWatcher
     {
-        public static Program Instance
-        {
-            get { return _instance; }
-        }
-        private static readonly Program _instance = new Program();
-
         private CancellationTokenSource TokenSource { get; set; }
         public List<Uri> RequestUris { get; set; }
         private RequestLogger Logger { get; set; }
