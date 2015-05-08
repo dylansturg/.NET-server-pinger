@@ -42,44 +42,76 @@ namespace ServerPinger
 
             }).ToList();
 
+            var programDoneToken = new CancellationTokenSource();
             var pingerProgram = new Program()
             {
                 RequestUris = requestUris,
             };
 
+            var programStatusMonitor = new ExecutionWatcher
+            {
+                WatchedProgram = pingerProgram
+            };
+            programStatusMonitor.StartPeriodicProgressReport(TimeSpan.FromSeconds(10), programDoneToken.Token);
+
             var programTask = pingerProgram.StartPinging();
+
+            string shouldQuit;
+            do
+            {
+                shouldQuit = Console.ReadLine();
+            } while (!String.IsNullOrWhiteSpace(shouldQuit) && shouldQuit.Equals("quit", StringComparison.InvariantCultureIgnoreCase));
+
+            programDoneToken.Cancel();
+            pingerProgram.RequestStop();
+
+            programTask.Wait();
+
+            programStatusMonitor.PrintStatusReport();
         }
     }
 
     public class ExecutionWatcher
     {
-        private static String GeneralReportFormat = "Status Report: {0} total requests worth {1} points completed in {3:0.000} seconds.";
+        private const String GeneralReportFormat = "Status Report: {0} total requests worth {1} points completed in {2:0.000} seconds.";
+        private const String ThroughputReportFormat = "Server Throughput: {0:0.00000} per second";
         public Program WatchedProgram { get; set; }
 
-
-        public async void StartPeriodicProgressReport(TimeSpan reportDelay, CancellationToken stopToken)
+        public void PrintStatusReport()
         {
-            while (!stopToken.IsCancellationRequested)
+            var report = WatchedProgram.SuccessHistogram();
+            var currentElapsed = WatchedProgram.ElapsedTime();
+
+            var totalWeight = 0;
+            var totalCount = 0;
+            foreach (var record in report)
             {
-                Thread.Sleep(reportDelay);
-
-                var report = WatchedProgram.SuccessHistogram();
-                var currentElapsed = WatchedProgram.ElapsedTime();
-
-                var totalWeight = 0;
-                var totalCount = 0;
-                foreach (var record in report)
-                {
-                    totalWeight += record.Key.Weight;
-                    totalCount++;
-                }
-
-                var elapsedSeconds = currentElapsed.TotalSeconds;
-
-                
+                totalWeight += record.Key.Weight;
+                totalCount++;
             }
 
+            var elapsedSeconds = currentElapsed.TotalSeconds;
 
+            var statusReport = String.Format(GeneralReportFormat, totalCount, totalWeight, elapsedSeconds);
+            var throughput = totalWeight / elapsedSeconds;
+            var throughputReport = String.Format(ThroughputReportFormat, throughput);
+
+            Console.WriteLine(statusReport);
+            Console.WriteLine(throughputReport);
+        }
+
+        public void StartPeriodicProgressReport(TimeSpan reportDelay, CancellationToken stopToken)
+        {
+            var reportThread = new Thread(delegate()
+            {
+                while (!stopToken.IsCancellationRequested)
+                {
+                    Thread.Sleep(reportDelay);
+                    PrintStatusReport();                   
+                }
+            });
+
+            reportThread.Start();
         }
     }
 
