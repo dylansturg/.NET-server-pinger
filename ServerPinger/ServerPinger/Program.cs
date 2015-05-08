@@ -23,12 +23,61 @@ namespace ServerPinger
                 url = Console.ReadLine();
             }
 
-            var requestUris = requests.Select(request => new Uri(request)).ToList();
+            var requestUris = requests.Select(request =>
+            {
+                var uri = request;
+                var weight = 1;
+                var parts = request.Split(' ');
+                if (parts.Length > 1)
+                {
+                    uri = parts[0];
+                    weight = int.Parse(parts[1]);
+                }
+
+                return new WeightedRequest
+                {
+                    Uri = new Uri(uri),
+                    Weight = weight,
+                };
+
+            }).ToList();
 
             var pingerProgram = new Program()
             {
                 RequestUris = requestUris,
             };
+
+            var programTask = pingerProgram.StartPinging();
+        }
+    }
+
+    public class ExecutionWatcher
+    {
+        private static String GeneralReportFormat = "Status Report: {0} total requests worth {1} points completed in {3:0.000} seconds.";
+        public Program WatchedProgram { get; set; }
+
+
+        public async void StartPeriodicProgressReport(TimeSpan reportDelay, CancellationToken stopToken)
+        {
+            while (!stopToken.IsCancellationRequested)
+            {
+                Thread.Sleep(reportDelay);
+
+                var report = WatchedProgram.SuccessHistogram();
+                var currentElapsed = WatchedProgram.ElapsedTime();
+
+                var totalWeight = 0;
+                var totalCount = 0;
+                foreach (var record in report)
+                {
+                    totalWeight += record.Key.Weight;
+                    totalCount++;
+                }
+
+                var elapsedSeconds = currentElapsed.TotalSeconds;
+
+                
+            }
 
 
         }
@@ -37,12 +86,32 @@ namespace ServerPinger
     public class Program : IFailureWatcher
     {
         private CancellationTokenSource TokenSource { get; set; }
-        public List<Uri> RequestUris { get; set; }
+        public List<WeightedRequest> RequestUris { get; set; }
         private RequestLogger Logger { get; set; }
+        private Stopwatch Timer { get; set; }
 
         public Program()
         {
             TokenSource = new CancellationTokenSource();
+        }
+
+        public Dictionary<WeightedRequest, int> SuccessHistogram()
+        {
+            var histogram = Logger.SuccessHistogram;
+
+            var weightedHistogram = new Dictionary<WeightedRequest, int>();
+            foreach (var entry in histogram)
+            {
+                var weightedRequest = RequestUris.Find(uri => uri.Uri == entry.Key);
+                weightedHistogram.Add(weightedRequest, entry.Value);
+            }
+
+            return weightedHistogram;
+        }
+
+        public TimeSpan ElapsedTime()
+        {
+            return Timer.Elapsed;
         }
 
         public async Task StartPinging()
@@ -50,17 +119,17 @@ namespace ServerPinger
             Logger = new RequestLogger();
             Logger.AddFailureWatch(this);
 
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
+            Timer = new Stopwatch();
+            Timer.Start();
 
             var pingTasks =
-                RequestUris.Select(uri => new ServerPinger(uri, TimeSpan.Zero, Logger).BeginPinging(TokenSource.Token));
+                RequestUris.Select(uri => new ServerPinger(uri.Uri, TimeSpan.Zero, Logger).BeginPinging(TokenSource.Token));
             // Tasks are running... now we just wait...
             var completeTask = Task.WhenAll(pingTasks);
 
             await completeTask;
 
-            stopwatch.Stop();
+            Timer.Stop();
         }
 
         public void RequestStop()
