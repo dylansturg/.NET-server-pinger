@@ -27,7 +27,7 @@ namespace ServerPinger
             Log = log;
         }
 
-        public async void BeginPinging(CancellationToken cancelToken)
+        public async Task BeginPinging(CancellationToken cancelToken)
         {
             if (RequestUri == null)
             {
@@ -56,6 +56,8 @@ namespace ServerPinger
                     Thread.Sleep(TimeDelay);
                 }
             }
+
+            // Goes until cancelled, then returns
         }
 
     }
